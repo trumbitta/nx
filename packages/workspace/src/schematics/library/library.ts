@@ -11,20 +11,23 @@ import {
   move,
   noop,
   SchematicsException,
+  filter,
 } from '@angular-devkit/schematics';
 import { join, normalize } from '@angular-devkit/core';
 import { Schema } from './schema';
 
-import { updateWorkspaceInTree, getNpmScope } from '@nrwl/workspace';
-import { updateJsonInTree } from '@nrwl/workspace';
-import { toFileName, names } from '@nrwl/workspace';
-import { formatFiles } from '@nrwl/workspace';
-import { offsetFromRoot } from '@nrwl/workspace';
+import {
+  updateWorkspaceInTree,
+  getNpmScope,
+  updateJsonInTree,
+  formatFiles,
+} from '@nrwl/workspace';
 
 import { generateProjectLint, addLintFiles } from '../../utils/lint';
 import { addProjectToNxJsonInTree, libsDir } from '../../utils/ast-utils';
-import { cliCommand } from '../../core/file-utils';
-import { toJS } from '../../utils/rules/to-js';
+import { toJS, updateTsConfigsToJs, maybeJs } from '../../utils/rules/to-js';
+import { wrapAngularDevkitSchematic } from '@nrwl/devkit/ngcli-adapter';
+import { names, offsetFromRoot } from '@nrwl/devkit';
 
 export interface NormalizedSchema extends Schema {
   name: string;
@@ -50,7 +53,6 @@ function addProject(options: NormalizedSchema): Rule {
       root: options.projectRoot,
       sourceRoot: join(normalize(options.projectRoot), 'src'),
       projectType: 'library',
-      schematics: {},
       architect,
     };
     return json;
@@ -82,17 +84,22 @@ function updateTsConfig(options: NormalizedSchema): Rule {
 }
 
 function createFiles(options: NormalizedSchema): Rule {
+  const { className, name, propertyName } = names(options.name);
+
   return mergeWith(
     apply(url(`./files/lib`), [
       template({
         ...options,
-        ...names(options.name),
-        cliCommand: cliCommand(),
+        className,
+        name,
+        propertyName,
+        cliCommand: 'nx',
         tmpl: '',
         offsetFromRoot: offsetFromRoot(options.projectRoot),
         hasUnitTestRunner: options.unitTestRunner !== 'none',
       }),
       move(options.projectRoot),
+      addTestFiles(options),
       options.js ? toJS() : noop(),
     ])
   );
@@ -102,6 +109,19 @@ function updateNxJson(options: NormalizedSchema): Rule {
   return addProjectToNxJsonInTree(options.name, { tags: options.parsedTags });
 }
 
+function addJest(options: NormalizedSchema) {
+  return options.unitTestRunner !== 'none'
+    ? externalSchematic('@nrwl/jest', 'jest-project', {
+        project: options.name,
+        setupFile: 'none',
+        supportTsx: true,
+        babelJest: options.babelJest,
+        skipSerializers: true,
+        testEnvironment: options.testEnvironment,
+      })
+    : noop();
+}
+
 export default function (schema: Schema): Rule {
   return (host: Tree, context: SchematicContext) => {
     const options = normalizeOptions(host, schema);
@@ -109,34 +129,33 @@ export default function (schema: Schema): Rule {
     return chain([
       addLintFiles(options.projectRoot, options.linter),
       createFiles(options),
+      options.js ? updateTsConfigsToJs(options) : noop(),
       !options.skipTsConfig ? updateTsConfig(options) : noop(),
       addProject(options),
       updateNxJson(options),
-      options.unitTestRunner !== 'none'
-        ? externalSchematic('@nrwl/jest', 'jest-project', {
-            project: options.name,
-            setupFile: 'none',
-            supportTsx: true,
-            babelJest: options.babelJest,
-            skipSerializers: true,
-            testEnvironment: options.testEnvironment,
-          })
-        : noop(),
+      addJest(options),
       formatFiles(options),
     ])(host, context);
   };
 }
 
+export const libraryGenerator = wrapAngularDevkitSchematic(
+  '@nrwl/workspace',
+  'library'
+);
+
 function normalizeOptions(host: Tree, options: Schema): NormalizedSchema {
-  const name = toFileName(options.name);
+  const name = names(options.name).fileName;
   const projectDirectory = options.directory
-    ? `${toFileName(options.directory)}/${name}`
+    ? `${names(options.directory).fileName}/${name}`
     : name;
 
   const projectName = projectDirectory.replace(new RegExp('/', 'g'), '-');
-  const fileName = options.simpleModuleName ? name : projectName;
+  const fileName = getCaseAwareFileName({
+    fileName: options.simpleModuleName ? name : projectName,
+    pascalCaseFiles: options.pascalCaseFiles,
+  });
 
-  // const projectRoot = `libs/${projectDirectory}`;
   const projectRoot = `${libsDir(host)}/${projectDirectory}`;
 
   const parsedTags = options.tags
@@ -157,8 +176,17 @@ function normalizeOptions(host: Tree, options: Schema): NormalizedSchema {
   };
 }
 
-function maybeJs(options: NormalizedSchema, path: string): string {
-  return options.js && (path.endsWith('.ts') || path.endsWith('.tsx'))
-    ? path.replace(/\.tsx?$/, '.js')
-    : path;
+function getCaseAwareFileName(options: {
+  pascalCaseFiles: boolean;
+  fileName: string;
+}) {
+  const normalized = names(options.fileName);
+
+  return options.pascalCaseFiles ? normalized.className : normalized.fileName;
+}
+
+function addTestFiles(options: Pick<Schema, 'unitTestRunner'>) {
+  return options.unitTestRunner === 'none'
+    ? filter((path) => !(path.endsWith('spec.ts') || path.endsWith('spec.tsx')))
+    : noop();
 }

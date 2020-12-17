@@ -1,7 +1,6 @@
 import yargsParser = require('yargs-parser');
 
 export function parseRunOneOptions(
-  nxJson: any,
   workspaceConfigJson: any,
   args: string[]
 ): false | { project; target; configuration; parsedArgs } {
@@ -18,6 +17,9 @@ export function parseRunOneOptions(
   const parsedArgs = yargsParser(args, {
     boolean: ['prod', 'help'],
     string: ['configuration', 'project'],
+    alias: {
+      c: 'configuration',
+    },
   });
 
   if (parsedArgs['help']) {
@@ -58,9 +60,13 @@ export function parseRunOneOptions(
   // we need both to be able to run a target, no tasks runner
   const p =
     workspaceConfigJson.projects && workspaceConfigJson.projects[project];
-  if (!p || !p.architect || !p.architect[target]) return false;
+  if (!p) return false;
+
+  const targets = p.architect ? p.architect : p.targets;
+  if (!targets || !targets[target]) return false;
 
   const res = { project, target, configuration, parsedArgs };
+  delete parsedArgs['c'];
   delete parsedArgs['configuration'];
   delete parsedArgs['prod'];
   delete parsedArgs['project'];

@@ -1,9 +1,10 @@
-import { Rule } from '@angular-devkit/schematics';
 import { Schema } from './schema';
 import { updateWorkspaceInTree } from '@nrwl/workspace';
+import { Tree } from '@nrwl/devkit';
+import { wrapAngularDevkitSchematic } from '@nrwl/devkit/ngcli-adapter';
 
-export default function (schema: Schema): Rule {
-  return updateWorkspaceInTree((json) => {
+export default function (host: Tree, schema: Schema) {
+  const fn = updateWorkspaceInTree((json) => {
     const project = json.projects[schema.project];
     if (!project) {
       throw new Error(`Invalid project name "${schema.project}"`);
@@ -17,8 +18,15 @@ export default function (schema: Schema): Rule {
       options: {
         command: schema.command,
         cwd: schema.cwd,
+        envFile: schema.envFile,
       },
     };
     return json;
-  });
+  }) as any;
+  fn(host);
 }
+
+export const runCommandsGenerator = wrapAngularDevkitSchematic(
+  '@nrwl/workspace',
+  'run-commands'
+);

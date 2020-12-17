@@ -7,7 +7,7 @@ const kill = require('tree-kill');
 const asyncExec = promisify(exec);
 let localRegistryProcess;
 
-process.env.PUBLISHED_VERSION = `9999.0.1`;
+process.env.PUBLISHED_VERSION = `9999.0.2`;
 process.env.npm_config_registry = `http://localhost:4872/`;
 process.env.YARN_REGISTRY = process.env.npm_config_registry;
 
@@ -67,10 +67,12 @@ async function publishPackage(packagePath) {
       ------------------
     `);
   }
-  await asyncExec(`npm publish`, {
-    cwd: packagePath,
-    env: process.env,
-  });
+  try {
+    await asyncExec(`npm publish`, {
+      cwd: packagePath,
+      env: process.env,
+    });
+  } catch (e) {}
 }
 
 export async function setup() {
@@ -94,7 +96,7 @@ async function runTest() {
 
   if (process.argv[3] === 'affected') {
     const affected = execSync(
-      `nx print-affected --base=origin/master --select=projects`
+      `npx nx print-affected --base=origin/master --select=projects`
     )
       .toString()
       .split(',')
@@ -109,12 +111,15 @@ async function runTest() {
             .join(',');
   }
 
-  execSync(`./scripts/package.sh 9999.0.1 "~10.0.0" "3.9.3" "2.0.4"`, {
+  execSync(`./scripts/package.sh 9999.0.2 "~10.0.0" "3.9.3" "2.0.4"`, {
     stdio: [0, 1, 2],
   });
-  execSync(`rm -rf tmp`);
-  execSync(`mkdir -p tmp/angular`);
-  execSync(`mkdir -p tmp/nx`);
+
+  if (process.argv[5] != '--rerun') {
+    execSync(`rm -rf tmp`);
+    execSync(`mkdir -p tmp/angular`);
+    execSync(`mkdir -p tmp/nx`);
+  }
 
   try {
     await setup();

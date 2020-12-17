@@ -5,7 +5,6 @@ import { basename } from 'path';
 import { getCommandAsString, getOutputs } from '../tasks-runner/utils';
 import * as yargs from 'yargs';
 import { NxArgs } from './utils';
-import { cliCommand } from '../core/file-utils';
 
 export function printAffected(
   affectedProjectsWithTargetAndConfig: ProjectGraphNode[],
@@ -46,16 +45,16 @@ function createTasks(
         target: nxArgs.target,
         configuration: nxArgs.configuration,
         overrides: overrides,
+        errorIfCannotFindConfiguration: false,
       })
   );
-  const cli = cliCommand();
   const isYarn = basename(process.env.npm_execpath || 'npm').startsWith('yarn');
   return tasks.map((task) => ({
     id: task.id,
     overrides: overrides,
     target: task.target,
     command: `${isYarn ? 'yarn' : 'npm run'} ${getCommandAsString(
-      cli,
+      'nx',
       isYarn,
       task
     )}`,

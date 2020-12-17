@@ -20,7 +20,7 @@ import {
 import { formatFiles } from '../../utils/rules/format-files';
 
 import * as ts from 'typescript';
-import { toFileName } from '../../utils/name-utils';
+import { names } from '@nrwl/devkit';
 
 export default function (options: Schema): Rule {
   options = normalizeOptions(options);
@@ -39,6 +39,7 @@ function createPreset(options: Schema): Rule {
       externalSchematic('@nrwl/angular', 'application', {
         name: options.name,
         style: options.style,
+        linter: options.linter,
       }),
       setDefaultCollection('@nrwl/angular'),
     ]);
@@ -47,6 +48,7 @@ function createPreset(options: Schema): Rule {
       externalSchematic('@nrwl/react', 'application', {
         name: options.name,
         style: options.style,
+        linter: options.linter,
       }),
       setDefaultCollection('@nrwl/react'),
     ]);
@@ -55,6 +57,7 @@ function createPreset(options: Schema): Rule {
       externalSchematic('@nrwl/next', 'application', {
         name: options.name,
         style: options.style,
+        linter: options.linter,
       }),
       setDefaultCollection('@nrwl/next'),
     ]);
@@ -63,6 +66,7 @@ function createPreset(options: Schema): Rule {
       externalSchematic('@nrwl/web', 'application', {
         name: options.name,
         style: options.style,
+        linter: options.linter,
       }),
       addDepsToPackageJson(
         {},
@@ -70,7 +74,7 @@ function createPreset(options: Schema): Rule {
           '@ungap/custom-elements': '0.1.6',
         }
       ),
-      addPolyfills(`apps/${toFileName(options.name)}/src/polyfills.ts`, [
+      addPolyfills(`apps/${names(options.name).fileName}/src/polyfills.ts`, [
         '@ungap/custom-elements',
       ]),
       setDefaultCollection('@nrwl/web'),
@@ -80,12 +84,22 @@ function createPreset(options: Schema): Rule {
       externalSchematic('@nrwl/angular', 'application', {
         name: options.name,
         style: options.style,
+        linter: options.linter,
       }),
       externalSchematic('@nrwl/nest', 'application', {
         name: 'api',
         frontendProject: options.name,
+        linter: options.linter,
       }),
-      schematic('library', { name: 'api-interfaces' }, { interactive: false }),
+      schematic(
+        'library',
+        {
+          name: 'api-interfaces',
+          unitTestRunner: 'none',
+          linter: options.linter,
+        },
+        { interactive: false }
+      ),
       setDefaultCollection('@nrwl/angular'),
       connectAngularAndNest(options),
     ]);
@@ -94,12 +108,22 @@ function createPreset(options: Schema): Rule {
       externalSchematic('@nrwl/react', 'application', {
         name: options.name,
         style: options.style,
+        linter: options.linter,
       }),
       externalSchematic('@nrwl/express', 'application', {
         name: 'api',
         frontendProject: options.name,
+        linter: options.linter,
       }),
-      schematic('library', { name: 'api-interfaces' }, { interactive: false }),
+      schematic(
+        'library',
+        {
+          name: 'api-interfaces',
+          unitTestRunner: 'none',
+          linter: options.linter,
+        },
+        { interactive: false }
+      ),
       setDefaultCollection('@nrwl/react'),
       connectReactAndExpress(options),
     ]);
@@ -107,6 +131,7 @@ function createPreset(options: Schema): Rule {
     return chain([
       externalSchematic('@nrwl/nest', 'application', {
         name: options.name,
+        linter: options.linter,
       }),
       setDefaultCollection('@nrwl/nest'),
     ]);
@@ -280,7 +305,7 @@ export default App;
 
     host.overwrite(
       `apps/${options.name}/src/app/app.spec.tsx`,
-      `import { cleanup, getByText, render, wait } from '@testing-library/react';
+      `import { cleanup, getByText, render, waitFor } from '@testing-library/react';
 import React from 'react';
 import App from './app';
 
@@ -298,7 +323,7 @@ describe('App', () => {
     });
 
     const { baseElement } = render(<App />);
-    await wait(() => getByText(baseElement, 'my message'));
+    await waitFor(() => getByText(baseElement, 'my message'));
   });
 });
     `
@@ -358,6 +383,6 @@ function addPolyfills(polyfillsPath: string, polyfills: string[]): Rule {
 }
 
 function normalizeOptions(options: Schema): Schema {
-  options.name = toFileName(options.name);
+  options.name = names(options.name).fileName;
   return options;
 }

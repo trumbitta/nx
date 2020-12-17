@@ -15,10 +15,13 @@ interface RunCmdOpts {
   cwd?: string;
 }
 
-export let cli;
+export function currentCli() {
+  return process.env.SELECTED_CLI ? process.env.SELECTED_CLI : 'nx';
+}
+
 let projName: string;
 
-export function setCurrentProjName(name: string) {
+function setCurrentProjName(name: string) {
   projName = name;
   return name;
 }
@@ -27,54 +30,8 @@ export function uniq(prefix: string) {
   return `${prefix}${Math.floor(Math.random() * 10000000)}`;
 }
 
-export function forEachCli(
-  selectedCliOrFunction: string | Function,
-  callback?: (currentCLIName) => void
-) {
-  let clis;
-  if (process.env.SELECTED_CLI && selectedCliOrFunction && callback) {
-    if (selectedCliOrFunction == process.env.SELECTED_CLI) {
-      clis = [process.env.SELECTED_CLI];
-    } else {
-      clis = [];
-    }
-  } else if (process.env.SELECTED_CLI) {
-    clis = [process.env.SELECTED_CLI];
-  } else {
-    clis = callback ? [selectedCliOrFunction] : ['nx', 'angular'];
-  }
-
-  const cb: any = callback ? callback : selectedCliOrFunction;
-  clis.forEach((c) => {
-    describe(`[${c}]`, () => {
-      beforeAll(() => {
-        cli = c;
-      });
-      cb(c);
-    });
-  });
-}
-
-export function patchKarmaToWorkOnWSL(): void {
-  try {
-    const karma = readFile('karma.conf.js');
-    if (process.env['WINDOWSTMP']) {
-      updateFile(
-        'karma.conf.js',
-        karma.replace(
-          `const { constants } = require('karma');`,
-          `
-      const { constants } = require('karma');
-      process.env['TMPDIR']="${process.env['WINDOWSTMP']}";
-    `
-        )
-      );
-    }
-  } catch (e) {}
-}
-
 export function workspaceConfigName() {
-  return cli === 'angular' ? 'angular.json' : 'workspace.json';
+  return currentCli() === 'angular' ? 'angular.json' : 'workspace.json';
 }
 
 export function runCreateWorkspace(
@@ -85,17 +42,27 @@ export function runCreateWorkspace(
     style,
     base,
     packageManager,
+    cli,
+    extraArgs,
   }: {
     preset: string;
     appName?: string;
     style?: string;
     base?: string;
     packageManager?: string;
+    cli?: string;
+    extraArgs?: string;
   }
 ) {
+  setCurrentProjName(name);
+
   const linterArg =
     preset === 'angular' || preset === 'angular-nest' ? ' --linter=tslint' : '';
-  let command = `npx create-nx-workspace@${process.env.PUBLISHED_VERSION} ${name} --cli=${cli} --preset=${preset} ${linterArg} --no-nxCloud --no-interactive`;
+  let command = `npx create-nx-workspace@${
+    process.env.PUBLISHED_VERSION
+  } ${name} --cli=${
+    cli || currentCli()
+  } --preset=${preset} ${linterArg} --no-nxCloud --no-interactive`;
   if (appName) {
     command += ` --appName=${appName}`;
   }
@@ -111,8 +78,12 @@ export function runCreateWorkspace(
     command += ` --package-manager=${packageManager}`;
   }
 
+  if (extraArgs) {
+    command += ` ${extraArgs}`;
+  }
+
   const create = execSync(command, {
-    cwd: `./tmp/${cli}`,
+    cwd: `./tmp/${currentCli()}`,
     stdio: [0, 1, 2],
     env: process.env,
   });
@@ -120,7 +91,7 @@ export function runCreateWorkspace(
 }
 
 export function yarnAdd(pkg: string, projName?: string) {
-  const cwd = projName ? `./tmp/${cli}/${projName}` : tmpProjPath();
+  const cwd = projName ? `./tmp/${currentCli()}/${projName}` : tmpProjPath();
   const install = execSync(`yarn add ${pkg}`, {
     cwd,
     // ...{ stdio: ['pipe', 'pipe', 'pipe'] },
@@ -132,7 +103,7 @@ export function yarnAdd(pkg: string, projName?: string) {
 
 export function runNgNew(): string {
   return execSync(`../../node_modules/.bin/ng new proj --no-interactive`, {
-    cwd: `./tmp/${cli}`,
+    cwd: `./tmp/${currentCli()}`,
     env: process.env,
   }).toString();
 }
@@ -142,7 +113,6 @@ export function runNgNew(): string {
  * for the currently selected CLI.
  */
 export function newProject(): void {
-  projName = uniq('proj');
   try {
     if (!directoryExists(tmpBackupProjPath())) {
       runCreateWorkspace('proj', { preset: 'empty' });
@@ -162,29 +132,20 @@ export function newProject(): void {
           (f) => f !== '@nrwl/nx-plugin' && f !== `@nrwl/eslint-plugin-nx`
         )
         .forEach((p) => {
-          runCLI(`g ${p}:init`, { cwd: `./tmp/${cli}/proj` });
+          runCLI(`g ${p}:init --no-interactive`, {
+            cwd: `./tmp/${currentCli()}/proj`,
+          });
         });
-      execSync(`mv ./tmp/${cli}/proj ${tmpBackupProjPath()}`);
+
+      execSync(`mv ./tmp/${currentCli()}/proj ${tmpBackupProjPath()}`);
     }
+    projName = uniq('proj');
     execSync(`cp -a ${tmpBackupProjPath()} ${tmpProjPath()}`);
   } catch (e) {
     console.log(`Failed to set up project for e2e tests.`);
     console.log(e.message);
     throw e;
   }
-}
-
-/**
- * Ensures that a project has been setup
- * in the temporary project path for the
- * currently selected CLI.
- *
- * If one is not found, it creates a new project.
- */
-export function ensureProject(): void {
-  // if (!directoryExists(tmpProjPath())) {
-  newProject();
-  // }
 }
 
 export function supportUi() {
@@ -203,7 +164,7 @@ export function runCommandAsync(
     exec(
       command,
       {
-        cwd: opts.cwd || tmpProjPath(),
+        cwd: tmpProjPath(),
         env: { ...process.env, FORCE_COLOR: 'false' },
       },
       (err, stdout, stderr) => {
@@ -213,6 +174,43 @@ export function runCommandAsync(
         resolve({ stdout, stderr, combinedOutput: `${stdout}${stderr}` });
       }
     );
+  });
+}
+
+export function runCommandUntil(
+  command: string,
+  criteria: (output: string) => boolean
+) {
+  const p = exec(`./node_modules/.bin/nx ${command}`, {
+    cwd: tmpProjPath(),
+    env: { ...process.env, FORCE_COLOR: 'false' },
+  });
+
+  return new Promise((res, rej) => {
+    let output = '';
+    let complete = false;
+    p.stdout.on('data', (c) => {
+      output += c.toString();
+      if (criteria(output)) {
+        complete = true;
+        res(true);
+        p.kill();
+      }
+    });
+    p.stderr.on('data', (c) => {
+      output += c.toString();
+      if (criteria(output)) {
+        complete = true;
+        res(true);
+        p.kill();
+      }
+    });
+    p.on('exit', (code) => {
+      if (code !== 0 && !complete) {
+        console.log(output);
+      }
+      rej(`Exited with ${code}`);
+    });
   });
 }
 
@@ -327,18 +325,20 @@ function setMaxWorkers() {
     const workspace = readJson(workspaceFile);
 
     Object.keys(workspace.projects).forEach((appName) => {
-      const {
-        architect: { build },
-      } = workspace.projects[appName];
+      const targets = workspace.projects[appName].targets
+        ? workspace.projects[appName].targets
+        : workspace.projects[appName].architect;
+      const build = targets.build;
 
       if (!build) {
         return;
       }
 
+      const executor = build.builder ? build.builder : build.executor;
       if (
-        build.builder.startsWith('@nrwl/node') ||
-        build.builder.startsWith('@nrwl/web') ||
-        build.builder.startsWith('@nrwl/jest')
+        executor.startsWith('@nrwl/node') ||
+        executor.startsWith('@nrwl/web') ||
+        executor.startsWith('@nrwl/jest')
       ) {
         build.options.maxWorkers = 4;
       }
@@ -436,9 +436,13 @@ export function getSize(filePath: string): number {
 }
 
 export function tmpProjPath(path?: string) {
-  return path ? `./tmp/${cli}/${projName}/${path}` : `./tmp/${cli}/${projName}`;
+  return path
+    ? `./tmp/${currentCli()}/${projName}/${path}`
+    : `./tmp/${currentCli()}/${projName}`;
 }
 
 function tmpBackupProjPath(path?: string) {
-  return path ? `./tmp/${cli}/proj-backup/${path}` : `./tmp/${cli}/proj-backup`;
+  return path
+    ? `./tmp/${currentCli()}/proj-backup/${path}`
+    : `./tmp/${currentCli()}/proj-backup`;
 }
